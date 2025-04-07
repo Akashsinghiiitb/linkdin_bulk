@@ -1,0 +1,282 @@
+
+import linkedin_api
+import re
+from urllib.parse import unquote
+import requests
+import json
+import time
+import os
+from linkedin_api.client import ChallengeException
+from log_generator import generate_log
+from datetime import date, datetime
+
+# Log file name``
+current_date = date.today()
+current_time = datetime.now().strftime("%H:%M").replace(":", ",")
+LOG_FILE = f"{current_time} {current_date} Linkedin-api-Scraper"
+
+def do_log(*message):
+    output_data = ''
+    for i in message:
+        output_data += f"{i} "
+    print(output_data)
+    generate_log(output_data, LOG_FILE)
+
+while True:
+    os.system("cls")
+    print("Version:23.6.8 \nGreetings from Banao Technologies!\n"
+    "Please enter your LinkedIn email, password and Banao Token in the designated fields and relax while our program extracts the "
+    "necessary data for you. We respect your privacy and want to assure you that any data entered by you will be not stored in any way."
+    "Please note that this program is designed solely for the purpose of aiding Banao Technologies, and we strongly advise against using it for any other purpose.\n\n"
+    "NOTE : This script will take 6 hours to complete.")
+    
+    email = input("Email > ")
+    password = input("Password > ")
+    token = input("Token > ")
+    try:
+        api = linkedin_api.Linkedin(email,password)
+        break
+    except requests.exceptions.ConnectionError:
+        do_log("Connection Error .")
+        time.sleep(5)
+        continue
+    except ChallengeException:
+        do_log("Wrong Email or Password")
+        time.sleep(5)
+
+# base_url = "http://localhost:8000"
+base_url = "https://bbd.atg.party"
+
+
+
+start = time.time()
+def json_pretty_print(json_data):
+    do_log(json.dumps(json_data, indent=4, sort_keys=True))
+    
+def log_token(token):
+    return None
+
+def get_company_details(company_url):
+    # try:
+    url = unquote(company_url)
+    match = re.search(r"/company/(.*)", url)
+    if match:
+        do_log(match.group(1))
+        data = api.get_company(match.group(1))
+        return data
+    do_log('didnt mached ->', url)
+    return None
+    # except Exception as e:
+    #     do_log(e)
+    #     do_log("Error")
+    
+def get_peoples_by_urn(urn):
+    do_log("urn received in people search: ", urn.strip())
+    final_peoples = []
+    peoples = api.search_people(current_company=[urn])
+    for people in peoples:
+        try:
+            url = "https://www.linkedin.com/in/" + people["public_id"]
+            d = {
+                'url': url,
+                'name':people['name'],
+                'source': "Linkedin",
+                'position':people['jobtitle'],
+                'location': people['location']
+            }
+            final_peoples.append(d)
+        except:
+            pass
+    do_log("People count:" , len(peoples))
+    return final_peoples
+    # do_log(peoples)
+    
+    
+    
+def struct_company_details(data):
+    return_data = {
+        'description':None,
+        'website':None,
+        'domain':None,
+        'employeeSize':None,
+        'number':None,
+        'followers':None,
+        'headquarters': None,
+        'companyType':None,
+        'fundingType':None,
+        'location':None,
+        'posts':None,
+        'companyEmail': None,
+        'founded':None,
+        'people':[]
+    }
+    
+    try:
+        return_data["description"] = data["description"]
+    except:
+        pass
+    
+    try:
+        return_data["website"] = data["companyPageUrl"]
+    except:
+        try:
+            if data["callToAction"]["callToActionType"] == "VIEW_WEBSITE":
+                return_data["website"] = data["callToAction"]["url"]
+        except:
+            pass
+    try:
+        return_data["domain"] = data["tagline"]
+    except:
+        pass
+    
+    try:
+        return_data["employeeSize"] = data["staffCount"]
+    except:
+        try:
+            return_data["employeeSize"] = f'{data["staffCountRange"]["start"]} {data["staffCountRange"]["end"]}'
+        except:
+            pass
+        
+    # try:
+    #     return_data["number"] = data["phone"]["number"]
+    # except:
+    #     pass
+    
+    try:
+        return_data["followers"] = data["followingInfo"]["followerCount"]
+    except:
+        pass
+    
+    try:
+        return_data["headquarters"] = get_company_location("abc",data)
+    except Exception as e:
+        do_log("error at hq:", e)
+        pass
+    
+    try:
+        return_data["companyType"] = data["companyType"]["localizedName"]
+    except:
+        pass
+    
+    try:
+        return_data["founded"] = data["foundedOn"]["year"]
+    except:
+        pass
+    
+    try:
+        peoples = get_peoples_by_urn(data["entityUrn"].split(":")[-1])
+        return_data["people"] = peoples
+    
+    except Exception as e:
+        do_log(e)
+        pass
+    
+    return return_data
+        
+        
+
+def get_employeess(company_url):
+    try:
+        data = api.get_company_employees(company_url)
+        return data
+    except Exception as e:
+        do_log("Error")
+
+def get_companies(keyword):
+    try:
+        data = api.get_companies(keyword)
+        return data
+    except:
+        do_log("Error")
+        
+def get_companies_from_internal_api(count = 10):
+    try:
+        res = requests.get(f"{base_url}/api/company-without-location-headquarter?count={count}&token={token}&v=2", headers={"auth":token,"api":'1'})
+        raw = res.json()
+        run_id = raw['run_id']
+        return raw['data'], run_id
+    except Exception as e:
+        do_log("Error at get:", e)
+        pass
+    
+def post_companies_to_internal_api(companies):
+    try:
+        res = requests.post(f"{base_url}/api/save-location-by-company-detail-id", json=companies)
+        return res.json()
+    except:
+        pass
+def post_company_details(data, run_id):
+    try:
+        res = requests.post(f"{base_url}/api/save-CompanyDetails", json=data, headers={"auth":token,"api":'1', "run_id":str(run_id)})
+        return res.json()
+    except Exception as e:
+        do_log("Error while on save API: ",e)
+    
+def get_values_from_dict(dict):
+    return [dict[i] for i in dict]
+
+def get_company_location(company_url, data=None):
+    if data == None:
+        data = get_company_details(company_url)
+    try:
+        location_list = get_values_from_dict(data['headquarter'])
+        location = " ".join(location_list)
+        return location
+    except:
+        if data == None:
+            return None
+        return None
+
+def main(run_id = None):
+    companies, run_id_new = get_companies_from_internal_api(10)
+    if not run_id:
+        run_id = run_id_new
+    for company in companies:
+        try:
+            raw_data = get_company_details(company['url'])
+            data = struct_company_details(raw_data)
+            data['url'] = company['url']
+            res = post_company_details(data=[data], run_id=run_id)
+            do_log("Response from server:",res)
+        except Exception as e:
+            do_log("Main loop error:", e)
+            pass
+    
+    return run_id
+
+def do_kill():
+    run_time = time.time() - start
+    if run_time > 6*60*60:
+        do_log("You can close now")
+        return True
+    return False
+
+def increase_run_count(run_id):
+    x = requests.post(f"{base_url}/api/increment-run-count", json={'id':run_id}, headers={"auth":token})
+    do_log(x.text)
+
+if __name__ == "__main__":
+    #print(get_companies_from_internal_api(10))
+    # data = get_company_details("https://www.linkedin.com/company/heritage-one-ranchi")
+    # data = get_company_details("https://www.linkedin.com/company/banao-tech")
+    # print(get_peoples_by_urn('47594915'))
+    # json_pretty_print(data)
+    # json_pretty_print(struct_company_details(data))
+    # location_list = get_values_from_dict(data['headquarter'])
+    # location = " ".join(location_list)
+    # print(location)
+    # print(get_employeess("https://www.linkedin.com/company/heritage-one-ranchi"))
+    #print(get_companies("sardar"))
+    i = 0
+    run_id = None
+    while True:
+        do_log(i)
+        run_id = main(run_id)
+        i += 1
+        if do_kill() :
+            break
+        increase_run_count(run_id)
+    do_log("Time taken : ",round(time.time() - start,2))
+    input("Press ANY key to exit .")
+    pass
+    
